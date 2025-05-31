@@ -3,7 +3,8 @@ from fpdf import FPDF
 from random import randint
 
 # Função para desenhar a régua
-def desenhar_regua(pdf, font_size):
+def desenhar_regua(pdf, font_size, font_color):
+    pdf.set_text_color(*font_color)
     pdf.set_font("Arial", size=font_size)
     regua = " · ".join(str(i) for i in range(0, 21))
     pdf.multi_cell(0, 8, f"Régua de Soma:\n{regua}", align="C")
@@ -24,7 +25,7 @@ def gerar_exercicios(valor_soma, quantidade, simples=False, limite=None):
     return exercicios
 
 # Função principal para gerar o PDF
-def gerar_pdf(font_size, num_colunas, quantidade, simples, somas):
+def gerar_pdf(font_size, num_colunas, quantidade, simples, somas, font_color):
     if quantidade > 20 or font_size > 14:
         num_colunas = 2  # ajuste automático
 
@@ -33,11 +34,12 @@ def gerar_pdf(font_size, num_colunas, quantidade, simples, somas):
 
     for soma in somas:
         pdf.add_page()
+        pdf.set_text_color(*font_color)
         pdf.set_font("Arial", "B", font_size + 4)
         pdf.cell(0, 10, f"Exercícios de Soma {soma}", align="C")
         pdf.ln(10)
         
-        desenhar_regua(pdf, font_size)
+        desenhar_regua(pdf, font_size, font_color)
         
         exercicios = gerar_exercicios(soma, quantidade, simples=simples)
 
@@ -45,6 +47,7 @@ def gerar_pdf(font_size, num_colunas, quantidade, simples, somas):
         row_height = font_size + 2
         
         pdf.set_font("Arial", size=font_size)
+        pdf.set_text_color(*font_color)
         x_positions = [10 + i * col_width for i in range(num_colunas)]
         y_start = pdf.get_y() + 5
         
@@ -78,10 +81,20 @@ if soma_max < soma_min:
     st.error("Soma máxima deve ser maior ou igual à mínima.")
     st.stop()
 
+# Escolha da cor da fonte - usando seletor de cor do Streamlit
+cor_hex = st.color_picker("Escolha a cor da fonte", "#000000")
+
+# Converter HEX para RGB (0-255)
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+font_color = hex_to_rgb(cor_hex)
+
 somas = list(range(soma_min, soma_max + 1))
 
 if st.button("Gerar PDF"):
-    pdf_bytes = gerar_pdf(font_size, num_colunas, quantidade, simples, somas)
+    pdf_bytes = gerar_pdf(font_size, num_colunas, quantidade, simples, somas, font_color)
     st.success("✅ PDF gerado com sucesso!")
     st.download_button(
         label="Baixar PDF",
