@@ -1,59 +1,47 @@
 import streamlit as st
-import pdfplumber
+from pdf2image import convert_from_bytes
+import pytesseract
 import re
 from datetime import datetime
+from io import BytesIO
 
-st.title("Conversor de Extrato Bancário (PDF para OFX) - pdfplumber")
+st.title("Conversor de Extrato Bancário (PDF via OCR para OFX)")
 
 uploaded_file = st.file_uploader("Carregue o arquivo PDF do extrato", type="pdf")
 
 if uploaded_file is not None:
+    # Converte PDF para imagens
+    images = convert_from_bytes(uploaded_file.read())
+
+    texto_total = ""
+    for img in images:
+        texto = pytesseract.image_to_string(img, lang='por')  # OCR com idioma português
+        texto_total += texto + "\n"
+
     transacoes = []
 
-    with pdfplumber.open(uploaded_file) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
+    # Obtém o ano do extrato
+    match = re.search(r'Período do extrato\s+(\d{2})\s*/\s*(\d{4})', texto_total)
+    ano_extrato = match.group(2) if match else '2025'
 
-            for table in tables:
-                for row in table:
-                    # Evita linhas nulas
-                    if not row or len(row) < 6:
-                        continue
+    # Regex geral: data, documento, valor e D/C
+    regex = re.compile(r"(\d{2}/\d{2}/\d{4}).*?(\d{3}(?:\.\d+)+).*?([\d\.]+,\d{2})\s+([DC])", re.DOTALL)
 
-                    # Exemplo de colunas: Dt. movimento | Ag. origem | Lote | Histórico | Documento | Valor | Saldo
-                    data_raw = row[0]
-                    historico = row[3]
-                    documento = row[4]
-                    valor_raw = row[5]
-                    
-                    # Ajuste conforme estrutura real das colunas
+    for m in regex.finditer(texto_total):
+        data_br, doc_num, valor_str, tipo = m.groups()
+        data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
+        valor_fmt = valor_str.replace('.', '').replace(',', '.')
+        valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
+        tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-                    # Verifica se a data está no formato esperado
-                    match_data = re.match(r"(\d{2}/\d{2}/\d{4})", data_raw)
-                    if not match_data:
-                        continue
-
-                    data_br = match_data.group(1)
-                    data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
-
-                    # Verifica valor e tipo (D ou C)
-                    match_valor = re.search(r"([\d\.]+,\d{2})\s*([DC])", valor_raw)
-                    if not match_valor:
-                        continue
-
-                    valor_str, tipo = match_valor.groups()
-                    valor_fmt = valor_str.replace('.', '').replace(',', '.')
-                    valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
-                    tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
-
-                    transacoes.append({
-                        "Data": data_fmt,
-                        "Documento": documento[-6:],
-                        "Valor": valor_fmt,
-                        "Tipo": tipo_transacao,
-                        "Descricao": historico,
-                        "FITID": f"{data_fmt}{documento[-3:]}"
-                    })
+        transacoes.append({
+            "Data": data_fmt,
+            "Documento": doc_num[-6:],
+            "Valor": valor_fmt,
+            "Tipo": tipo_transacao,
+            "Descricao": f"Movimentação {data_br}",
+            "FITID": f"{data_fmt}{doc_num[-3:]}"
+        })
 
     # === GERAÇÃO DO ARQUIVO OFX ===
     ofx_conteudo = """OFXHEADER:100
