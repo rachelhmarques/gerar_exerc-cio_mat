@@ -19,31 +19,42 @@ if uploaded_file is not None:
     while i < len(linhas):
         linha = linhas[i].strip()
 
-        # Detecta início de uma transação
-        match = re.match(r"(\d{2}/\d{2}/\d{4})\s+.*\s+(\d{3}\.\d{3}\.\d{3}\.\d{3}\.\d{3})\s+([\d.,]+)\s+([DC])", linha)
-        if match:
-            data_br, doc_num, valor_str, tipo = match.groups()
+        # Verifica se começa com data no formato dd/mm/yyyy
+        match_data = re.match(r"(\d{2}/\d{2}/\d{4})", linha)
+        if match_data:
+            data_br = match_data.group(1)
             data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
-            valor_fmt = valor_str.replace('.', '').replace(',', '.')
-            valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
-            tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-            # Tenta pegar a descrição na próxima linha se não começar com data
-            descricao = ""
-            if i + 1 < len(linhas):
-                prox_linha = linhas[i + 1].strip()
-                if not re.match(r"\d{2}/\d{2}/\d{4}", prox_linha):
-                    descricao = prox_linha
-                    i += 1  # avança para pular a descrição
+            # Tentativa de extrair valor e D/C
+            match_valor = re.search(r"([\d\.]+,\d{2})\s+([DC])", linha)
+            if match_valor:
+                valor_str, tipo = match_valor.groups()
+                valor_fmt = valor_str.replace('.', '').replace(',', '.')
+                valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
+                tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-            transacoes.append({
-                "Data": data_fmt,
-                "Documento": doc_num[-6:],  # pega últimos 6 dígitos
-                "Valor": valor_fmt,
-                "Tipo": tipo_transacao,
-                "Descricao": descricao if descricao else "Sem descrição",
-                "FITID": f"{data_fmt}{doc_num[-3:]}"
-            })
+                # Extrai o documento: número longo ou médio logo após tipo
+                match_doc = re.search(r"(\d{3}(?:\.\d+)+)", linha)
+                if not match_doc:
+                    match_doc = re.search(r"\d{2,}", linha)  # qualquer número com 2+ dígitos
+                doc_num = match_doc.group(0) if match_doc else "000000"
+
+                # Procura por descrição na próxima linha
+                descricao = ""
+                if i + 1 < len(linhas):
+                    prox_linha = linhas[i + 1].strip()
+                    if not re.match(r"\d{2}/\d{2}/\d{4}", prox_linha):
+                        descricao = prox_linha
+                        i += 1  # Avança para pular descrição
+
+                transacoes.append({
+                    "Data": data_fmt,
+                    "Documento": doc_num[-6:],  # últimos 6 dígitos
+                    "Valor": valor_fmt,
+                    "Tipo": tipo_transacao,
+                    "Descricao": descricao if descricao else linha,
+                    "FITID": f"{data_fmt}{doc_num[-3:]}"
+                })
 
         i += 1
 
