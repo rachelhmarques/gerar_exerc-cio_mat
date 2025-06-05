@@ -14,7 +14,6 @@ if uploaded_file is not None:
         linhas.extend(pagina.get_text().splitlines())
 
     transacoes = []
-    i = 0
 
     # Obtém o ano do extrato
     ano_extrato = None
@@ -26,7 +25,7 @@ if uploaded_file is not None:
     if not ano_extrato:
         ano_extrato = '2025'  # fallback
 
-    while i < len(linhas):
+    for i in range(len(linhas)):
         linha = linhas[i].strip()
 
         # Procura valor com D/C
@@ -37,34 +36,40 @@ if uploaded_file is not None:
             valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
             tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-            # Procura data na linha
-            match_data = re.search(r"(\d{2}/\d{2}/\d{4})", linha)
-            match_data_parcial = re.search(r"(\d{2}/\d{2})", linha)
-
+            # Busca data: nesta linha ou até 2 linhas acima
             data_br = None
-            if match_data:
-                data_br = match_data.group(1)
-            elif match_data_parcial:
-                data_br = f"{match_data_parcial.group(1)}/{ano_extrato}"
+            for j in range(i, max(i - 3, -1), -1):
+                linha_data = linhas[j]
+                match_data = re.search(r"(\d{2}/\d{2}/\d{4})", linha_data)
+                match_data_parcial = re.search(r"(\d{2}/\d{2})(?!/)", linha_data)
+                if match_data:
+                    data_br = match_data.group(1)
+                    break
+                elif match_data_parcial:
+                    data_br = f"{match_data_parcial.group(1)}/{ano_extrato}"
+                    break
 
             if data_br:
                 data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
             else:
-                data_fmt = "00000000"  # Se não achar data, coloca placeholder
+                data_fmt = "00000000"  # placeholder se não achar
 
-            # Documento: pega maior número
+            # Documento: número longo
             match_doc = re.search(r"(\d{3}(?:\.\d+)+)", linha)
             if not match_doc:
                 match_doc = re.search(r"\d{2,}", linha)
             doc_num = match_doc.group(0) if match_doc else "000000"
 
-            # Descrição: próxima linha se não for nova movimentação
+            # Descrição: linha anterior ou próxima, se não for valor
             descricao = ""
             if i + 1 < len(linhas):
                 prox_linha = linhas[i + 1].strip()
-                if not re.search(r"([\d\.]+,\d{2})\s+([DC])", prox_linha):
+                if not re.search(r"([\d\.]+,\d{2})\s+[DC]", prox_linha):
                     descricao = prox_linha
-                    i += 1  # pula a descrição
+            if not descricao and i > 0:
+                ant_linha = linhas[i - 1].strip()
+                if not re.search(r"([\d\.]+,\d{2})\s+[DC]", ant_linha):
+                    descricao = ant_linha
 
             transacoes.append({
                 "Data": data_fmt,
@@ -74,8 +79,6 @@ if uploaded_file is not None:
                 "Descricao": descricao if descricao else linha,
                 "FITID": f"{data_fmt}{doc_num[-3:]}"
             })
-
-        i += 1
 
     # === GERAÇÃO DO ARQUIVO OFX ===
     ofx_conteudo = """OFXHEADER:100
