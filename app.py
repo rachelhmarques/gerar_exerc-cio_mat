@@ -2,16 +2,12 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 from datetime import datetime
-import os
-from io import StringIO
 
 st.title("Conversor de Extrato Bancário (PDF para OFX)")
 
-# === Upload do PDF ===
 uploaded_file = st.file_uploader("Carregue o arquivo PDF do extrato", type="pdf")
 
 if uploaded_file is not None:
-    # === EXTRAÇÃO DE DADOS DO PDF ===
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     linhas = []
     for pagina in doc:
@@ -19,42 +15,37 @@ if uploaded_file is not None:
 
     transacoes = []
     i = 0
-    while i < len(linhas) - 4:
-        try:
-            datetime.strptime(linhas[i].strip(), "%d/%m/%Y")
-            data_br = linhas[i].strip()
-            tipo_linha = linhas[i + 2].strip()
-            doc_linha = linhas[i + 3].strip()
-            valor_linha = linhas[i + 4].strip()
 
-            match_valor = re.match(r"([\d\.]+,\d{2})\s+([DC])", valor_linha)
-            if match_valor:
-                valor, tipo = match_valor.groups()
-                data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
-                valor_fmt = valor.replace(".", "").replace(",", ".")
-                valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
-                tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
+    while i < len(linhas):
+        linha = linhas[i].strip()
 
-                doc_num = re.sub(r"[^\d]", "", doc_linha)[-6:]
+        # Detecta início de uma transação
+        match = re.match(r"(\d{2}/\d{2}/\d{4})\s+.*\s+(\d{3}\.\d{3}\.\d{3}\.\d{3}\.\d{3})\s+([\d.,]+)\s+([DC])", linha)
+        if match:
+            data_br, doc_num, valor_str, tipo = match.groups()
+            data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
+            valor_fmt = valor_str.replace('.', '').replace(',', '.')
+            valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
+            tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-                nome_linha = linhas[i + 5].strip() if (i + 5) < len(linhas) else ""
-                nome_valido = nome_linha and not re.search(r"\d+,\d{2}", nome_linha)
-                descricao = nome_linha if nome_valido else tipo_linha
+            # Tenta pegar a descrição na próxima linha se não começar com data
+            descricao = ""
+            if i + 1 < len(linhas):
+                prox_linha = linhas[i + 1].strip()
+                if not re.match(r"\d{2}/\d{2}/\d{4}", prox_linha):
+                    descricao = prox_linha
+                    i += 1  # avança para pular a descrição
 
-                transacoes.append({
-                    "Data": data_fmt,
-                    "Documento": doc_num,
-                    "Valor": valor_fmt,
-                    "Tipo": tipo_transacao,
-                    "Descricao": descricao,
-                    "FITID": f"{data_fmt}{doc_num[-3:]}"
-                })
+            transacoes.append({
+                "Data": data_fmt,
+                "Documento": doc_num[-6:],  # pega últimos 6 dígitos
+                "Valor": valor_fmt,
+                "Tipo": tipo_transacao,
+                "Descricao": descricao if descricao else "Sem descrição",
+                "FITID": f"{data_fmt}{doc_num[-3:]}"
+            })
 
-                i += 6 if nome_valido else 5
-            else:
-                i += 1
-        except ValueError:
-            i += 1
+        i += 1
 
     # === GERAÇÃO DO ARQUIVO OFX ===
     ofx_conteudo = """OFXHEADER:100
@@ -98,8 +89,8 @@ NEWFILEUID:NONE
      <ACCTTYPE>CHECKING
     </BANKACCTFROM>
     <BANKTRANLIST>
-     <DTSTART>20250501 
-     <DTEND>20250531 
+     <DTSTART>20250101
+     <DTEND>20250131
 """
 
     for t in transacoes:
@@ -120,11 +111,9 @@ NEWFILEUID:NONE
 </OFX>
 """
 
-    # Mostra prévia das transações
     st.subheader("Transações encontradas")
-    st.table(transacoes[:10])  # Mostra apenas as primeiras 10 para não sobrecarregar a tela
+    st.table(transacoes[:10])
 
-    # Cria um botão de download
     st.download_button(
         label="Baixar arquivo OFX",
         data=ofx_conteudo,
