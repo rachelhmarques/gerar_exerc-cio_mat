@@ -9,76 +9,34 @@ uploaded_file = st.file_uploader("Carregue o arquivo PDF do extrato", type="pdf"
 
 if uploaded_file is not None:
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-    linhas = []
+    texto = ""
     for pagina in doc:
-        linhas.extend(pagina.get_text().splitlines())
+        texto += pagina.get_text("text") + "\n"
 
     transacoes = []
 
     # Obtém o ano do extrato
-    ano_extrato = None
-    for linha in linhas:
-        match = re.search(r'Período do extrato\s+(\d{2}) / (\d{4})', linha)
-        if match:
-            mes_extrato, ano_extrato = match.groups()
-            break
-    if not ano_extrato:
-        ano_extrato = '2025'  # fallback
+    match = re.search(r'Período do extrato\s+(\d{2}) / (\d{4})', texto)
+    ano_extrato = match.group(2) if match else '2025'
 
-    for i in range(len(linhas)):
-        linha = linhas[i].strip()
+    # Regex geral: data, texto, valor, D/C
+    regex = re.compile(r"(\d{2}/\d{2}/\d{4}).*?(\d{2,3}(?:\.\d+)+).*?([\d\.]+,\d{2})\s+([DC])", re.DOTALL)
 
-        # Procura valor com D/C
-        match_valor = re.search(r"([\d\.]+,\d{2})\s+([DC])", linha)
-        if match_valor:
-            valor_str, tipo = match_valor.groups()
-            valor_fmt = valor_str.replace('.', '').replace(',', '.')
-            valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
-            tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
+    for m in regex.finditer(texto):
+        data_br, doc_num, valor_str, tipo = m.groups()
+        data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
+        valor_fmt = valor_str.replace('.', '').replace(',', '.')
+        valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
+        tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-            # Busca data: nesta linha ou até 2 linhas acima
-            data_br = None
-            for j in range(i, max(i - 3, -1), -1):
-                linha_data = linhas[j]
-                match_data = re.search(r"(\d{2}/\d{2}/\d{4})", linha_data)
-                match_data_parcial = re.search(r"(\d{2}/\d{2})(?!/)", linha_data)
-                if match_data:
-                    data_br = match_data.group(1)
-                    break
-                elif match_data_parcial:
-                    data_br = f"{match_data_parcial.group(1)}/{ano_extrato}"
-                    break
-
-            if data_br:
-                data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
-            else:
-                data_fmt = "00000000"  # placeholder se não achar
-
-            # Documento: número longo
-            match_doc = re.search(r"(\d{3}(?:\.\d+)+)", linha)
-            if not match_doc:
-                match_doc = re.search(r"\d{2,}", linha)
-            doc_num = match_doc.group(0) if match_doc else "000000"
-
-            # Descrição: linha anterior ou próxima, se não for valor
-            descricao = ""
-            if i + 1 < len(linhas):
-                prox_linha = linhas[i + 1].strip()
-                if not re.search(r"([\d\.]+,\d{2})\s+[DC]", prox_linha):
-                    descricao = prox_linha
-            if not descricao and i > 0:
-                ant_linha = linhas[i - 1].strip()
-                if not re.search(r"([\d\.]+,\d{2})\s+[DC]", ant_linha):
-                    descricao = ant_linha
-
-            transacoes.append({
-                "Data": data_fmt,
-                "Documento": doc_num[-6:],
-                "Valor": valor_fmt,
-                "Tipo": tipo_transacao,
-                "Descricao": descricao if descricao else linha,
-                "FITID": f"{data_fmt}{doc_num[-3:]}"
-            })
+        transacoes.append({
+            "Data": data_fmt,
+            "Documento": doc_num[-6:],
+            "Valor": valor_fmt,
+            "Tipo": tipo_transacao,
+            "Descricao": f"Movimentação {data_br}",
+            "FITID": f"{data_fmt}{doc_num[-3:]}"
+        })
 
     # === GERAÇÃO DO ARQUIVO OFX ===
     ofx_conteudo = """OFXHEADER:100
