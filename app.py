@@ -16,16 +16,33 @@ if uploaded_file is not None:
     transacoes = []
     i = 0
 
+    # Obtém o ano do extrato
+    ano_extrato = None
+    for linha in linhas:
+        match = re.search(r'Período do extrato\s+(\d{2}) / (\d{4})', linha)
+        if match:
+            mes_extrato, ano_extrato = match.groups()
+            break
+    if not ano_extrato:
+        ano_extrato = '2025'  # fallback padrão se não achar
+
     while i < len(linhas):
         linha = linhas[i].strip()
 
-        # Verifica se começa com data no formato dd/mm/yyyy
+        # Verifica data completa ou parcial
         match_data = re.match(r"(\d{2}/\d{2}/\d{4})", linha)
+        match_data_parcial = re.match(r"(\d{2}/\d{2})", linha)
+
+        data_br = None
         if match_data:
             data_br = match_data.group(1)
+        elif match_data_parcial:
+            data_br = f"{match_data_parcial.group(1)}/{ano_extrato}"
+
+        if data_br:
             data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
 
-            # Tentativa de extrair valor e D/C
+            # Extrai valor e D/C
             match_valor = re.search(r"([\d\.]+,\d{2})\s+([DC])", linha)
             if match_valor:
                 valor_str, tipo = match_valor.groups()
@@ -33,29 +50,28 @@ if uploaded_file is not None:
                 valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
                 tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-                # Extrai o documento: número longo ou médio logo após tipo
+                # Documento: qualquer número grande
                 match_doc = re.search(r"(\d{3}(?:\.\d+)+)", linha)
                 if not match_doc:
-                    match_doc = re.search(r"\d{2,}", linha)  # qualquer número com 2+ dígitos
+                    match_doc = re.search(r"\d{2,}", linha)
                 doc_num = match_doc.group(0) if match_doc else "000000"
 
-                # Procura por descrição na próxima linha
+                # Procura descrição na próxima linha
                 descricao = ""
                 if i + 1 < len(linhas):
                     prox_linha = linhas[i + 1].strip()
-                    if not re.match(r"\d{2}/\d{2}/\d{4}", prox_linha):
+                    if not re.match(r"\d{2}/\d{2}", prox_linha):
                         descricao = prox_linha
-                        i += 1  # Avança para pular descrição
+                        i += 1
 
                 transacoes.append({
                     "Data": data_fmt,
-                    "Documento": doc_num[-6:],  # últimos 6 dígitos
+                    "Documento": doc_num[-6:],
                     "Valor": valor_fmt,
                     "Tipo": tipo_transacao,
                     "Descricao": descricao if descricao else linha,
                     "FITID": f"{data_fmt}{doc_num[-3:]}"
                 })
-
         i += 1
 
     # === GERAÇÃO DO ARQUIVO OFX ===
@@ -123,7 +139,7 @@ NEWFILEUID:NONE
 """
 
     st.subheader("Transações encontradas")
-    st.table(transacoes[:10])
+    st.table(transacoes)
 
     st.download_button(
         label="Baixar arquivo OFX",
