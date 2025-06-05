@@ -24,54 +24,57 @@ if uploaded_file is not None:
             mes_extrato, ano_extrato = match.groups()
             break
     if not ano_extrato:
-        ano_extrato = '2025'  # fallback padrão se não achar
+        ano_extrato = '2025'  # fallback
 
     while i < len(linhas):
         linha = linhas[i].strip()
 
-        # Verifica data completa ou parcial
-        match_data = re.match(r"(\d{2}/\d{2}/\d{4})", linha)
-        match_data_parcial = re.match(r"(\d{2}/\d{2})", linha)
+        # Procura valor com D/C
+        match_valor = re.search(r"([\d\.]+,\d{2})\s+([DC])", linha)
+        if match_valor:
+            valor_str, tipo = match_valor.groups()
+            valor_fmt = valor_str.replace('.', '').replace(',', '.')
+            valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
+            tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
 
-        data_br = None
-        if match_data:
-            data_br = match_data.group(1)
-        elif match_data_parcial:
-            data_br = f"{match_data_parcial.group(1)}/{ano_extrato}"
+            # Procura data na linha
+            match_data = re.search(r"(\d{2}/\d{2}/\d{4})", linha)
+            match_data_parcial = re.search(r"(\d{2}/\d{2})", linha)
 
-        if data_br:
-            data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
+            data_br = None
+            if match_data:
+                data_br = match_data.group(1)
+            elif match_data_parcial:
+                data_br = f"{match_data_parcial.group(1)}/{ano_extrato}"
 
-            # Extrai valor e D/C
-            match_valor = re.search(r"([\d\.]+,\d{2})\s+([DC])", linha)
-            if match_valor:
-                valor_str, tipo = match_valor.groups()
-                valor_fmt = valor_str.replace('.', '').replace(',', '.')
-                valor_fmt = f"-{valor_fmt}" if tipo == 'D' else valor_fmt
-                tipo_transacao = "DEBIT" if tipo == 'D' else "CREDIT"
+            if data_br:
+                data_fmt = datetime.strptime(data_br, "%d/%m/%Y").strftime("%Y%m%d")
+            else:
+                data_fmt = "00000000"  # Se não achar data, coloca placeholder
 
-                # Documento: qualquer número grande
-                match_doc = re.search(r"(\d{3}(?:\.\d+)+)", linha)
-                if not match_doc:
-                    match_doc = re.search(r"\d{2,}", linha)
-                doc_num = match_doc.group(0) if match_doc else "000000"
+            # Documento: pega maior número
+            match_doc = re.search(r"(\d{3}(?:\.\d+)+)", linha)
+            if not match_doc:
+                match_doc = re.search(r"\d{2,}", linha)
+            doc_num = match_doc.group(0) if match_doc else "000000"
 
-                # Procura descrição na próxima linha
-                descricao = ""
-                if i + 1 < len(linhas):
-                    prox_linha = linhas[i + 1].strip()
-                    if not re.match(r"\d{2}/\d{2}", prox_linha):
-                        descricao = prox_linha
-                        i += 1
+            # Descrição: próxima linha se não for nova movimentação
+            descricao = ""
+            if i + 1 < len(linhas):
+                prox_linha = linhas[i + 1].strip()
+                if not re.search(r"([\d\.]+,\d{2})\s+([DC])", prox_linha):
+                    descricao = prox_linha
+                    i += 1  # pula a descrição
 
-                transacoes.append({
-                    "Data": data_fmt,
-                    "Documento": doc_num[-6:],
-                    "Valor": valor_fmt,
-                    "Tipo": tipo_transacao,
-                    "Descricao": descricao if descricao else linha,
-                    "FITID": f"{data_fmt}{doc_num[-3:]}"
-                })
+            transacoes.append({
+                "Data": data_fmt,
+                "Documento": doc_num[-6:],
+                "Valor": valor_fmt,
+                "Tipo": tipo_transacao,
+                "Descricao": descricao if descricao else linha,
+                "FITID": f"{data_fmt}{doc_num[-3:]}"
+            })
+
         i += 1
 
     # === GERAÇÃO DO ARQUIVO OFX ===
